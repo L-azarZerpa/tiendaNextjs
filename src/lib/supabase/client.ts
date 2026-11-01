@@ -8,4 +8,4 @@ export function createClient() {
 }
 
 // Agrega esta línea al final:
-export const supabase = createClient();
+export const supabase = createClient(); 
