@@ -3,7 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { useGoogleReCaptcha } from 'react-google-recaptcha-v3';
 import { createClient } from '@/lib/supabase/client';
+import { verifyRecaptcha } from '@/app/actions/recaptcha';
 
 export default function LoginPage() {
     const [email, setEmail] = useState('');
@@ -12,10 +14,13 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false);
     const router = useRouter();
 
-    // Inicializamos el cliente de Supabase optimizado para SSR con cookies
+    // Hook para ejecutar reCAPTCHA v3
+    const { executeRecaptcha } = useGoogleReCaptcha();
+
+    // Inicializamos el cliente de Supabase optimizado para SSR
     const supabase = createClient();
 
-    // Asegurar que el estado de carga se resetea al montar el componente (evita que se quede trabado por caché)
+    // Asegurar que el estado de carga se resetea al montar el componente
     useEffect(() => {
         setLoading(false);
     }, []);
@@ -25,17 +30,41 @@ export default function LoginPage() {
         setError(null);
         setLoading(true);
 
-        const { error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-        });
-
-        if (error) {
-            setError(error.message);
+        // 1. Verificar si reCAPTCHA está disponible
+        if (!executeRecaptcha) {
+            setError('La verificación de seguridad aún no está lista. Intenta nuevamente.');
             setLoading(false);
-        } else {
-            // Recarga limpia para sincronizar la sesión y evitar estados residuales en caché
-            window.location.href = '/';
+            return;
+        }
+
+        try {
+            // 2. Obtener token de reCAPTCHA para la acción 'login'
+            const token = await executeRecaptcha('login');
+
+            // 3. Validar token con la Server Action
+            const isHuman = await verifyRecaptcha(token);
+            if (!isHuman) {
+                setError('Acceso denegado: Actividad sospechosa detectada por el sistema anti-bot.');
+                setLoading(false);
+                return;
+            }
+
+            // 4. Autenticar en Supabase si la verificación fue exitosa
+            const { error: authError } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            });
+
+            if (authError) {
+                setError(authError.message);
+                setLoading(false);
+            } else {
+                // Recarga limpia para sincronizar la sesión y evitar estados residuales en caché
+                window.location.href = '/';
+            }
+        } catch (err) {
+            setError('Error durante la verificación de seguridad.');
+            setLoading(false);
         }
     };
 
@@ -95,7 +124,7 @@ export default function LoginPage() {
                         disabled={loading}
                         className="mt-2 w-full bg-slate-900 hover:bg-slate-800 text-white py-2.5 rounded-lg font-medium text-sm transition-colors cursor-pointer disabled:opacity-50"
                     >
-                        {loading ? "Iniciando sesión..." : "Entrar"}
+                        {loading ? "Verificando e iniciando..." : "Entrar"}
                     </button>
                 </form>
 

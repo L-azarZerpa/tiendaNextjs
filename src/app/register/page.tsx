@@ -3,10 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useGoogleReCaptcha } from "react-google-recaptcha-v3";
 import { supabase } from "@/lib/supabase/client";
+import { verifyRecaptcha } from "@/app/actions/recaptcha";
 
 export default function RegisterPage() {
     const router = useRouter();
+    const { executeRecaptcha } = useGoogleReCaptcha();
     const [fullName, setFullName] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -18,7 +21,26 @@ export default function RegisterPage() {
         setError(null);
         setLoading(true);
 
+        // 1. Verificar si reCAPTCHA está listo
+        if (!executeRecaptcha) {
+            setError("La verificación de seguridad aún no está lista. Intenta de nuevo.");
+            setLoading(false);
+            return;
+        }
+
         try {
+            // 2. Obtener el token de reCAPTCHA para la acción 'signup'
+            const token = await executeRecaptcha("signup");
+
+            // 3. Validar el token con la Server Action
+            const isHuman = await verifyRecaptcha(token);
+            if (!isHuman) {
+                setError("Registro bloqueado: Actividad sospechosa detectada.");
+                setLoading(false);
+                return;
+            }
+
+            // 4. Proceder con el registro en Supabase
             const { data, error } = await supabase.auth.signUp({
                 email,
                 password,
@@ -103,7 +125,7 @@ export default function RegisterPage() {
                         disabled={loading}
                         className="w-full bg-slate-800 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-slate-900 transition-colors shadow-sm mt-2 cursor-pointer disabled:opacity-50"
                     >
-                        {loading ? "Registrando..." : "Registrarse"}
+                        {loading ? "Verificando y registrando..." : "Registrarse"}
                     </button>
                 </form>
 
